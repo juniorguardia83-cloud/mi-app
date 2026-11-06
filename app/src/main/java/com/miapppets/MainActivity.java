@@ -26,7 +26,7 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 
-// Primera pantalla funcional: mascota, cuidados, misión diaria y progreso local.\npublic class MainActivity extends Activity {
+// Primera pantalla funcional: mascota, cuidados, misión diaria y progreso local.\n// La compilación de Android se verifica mediante GitHub Actions.\npublic class MainActivity extends Activity {
 
     private static final String PREFS = "mi_app_save";
     private static final String[] MISSIONS = {
