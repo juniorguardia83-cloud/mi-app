@@ -26,17 +26,26 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
+import android.webkit.CookieManager;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Burbuja flotante con forma de control de consola. Al tocarla se abre un panel
- * con controles de música y accesos a WhatsApp, Spotify y otras apps.
- * Pensado para gastar poca RAM: el panel se crea al abrirlo y se destruye al cerrarlo.
+ * Burbuja flotante con forma de control de consola. Al tocarla se abre un panel.
+ * Desde el panel se abren las apps en una VENTANA CHICA flotante (con una X abajo
+ * para cerrarla), arrastrable, encima del juego.
+ * Pensado para gastar poca RAM: el panel y la ventana se crean al abrirlos y se
+ * destruyen al cerrarlos.
  */
 public class OverlayService extends Service {
 
@@ -44,8 +53,13 @@ public class OverlayService extends Service {
     private static final String CHANNEL_ID = "panel_gamer";
     private static final int NOTIF_ID = 1;
 
+    private static final String UA_DESKTOP =
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/140.0.0.0 Safari/537.36";
+
     static volatile boolean running = false;
 
+    /** App que se abre en pantalla completa (la app instalada). */
     private static final class App {
         final String name, pkg, letter;
         final int color;
@@ -58,7 +72,35 @@ public class OverlayService extends Service {
         }
     }
 
+    /** App que se abre en la ventana chica (versión web). */
+    private static final class Web {
+        final String name, url, letter;
+        final int color;
+        final boolean desktop;
+
+        Web(String name, String url, String letter, int color, boolean desktop) {
+            this.name = name;
+            this.url = url;
+            this.letter = letter;
+            this.color = color;
+            this.desktop = desktop;
+        }
+    }
+
+    private static final Web[] WEBS = {
+            new Web("WhatsApp", "https://web.whatsapp.com/", "W", 0xFF25D366, true),
+            new Web("YouTube", "https://m.youtube.com/", "Y", 0xFFE62117, false),
+            new Web("Spotify", "https://open.spotify.com/", "S", 0xFF1DB954, true),
+            new Web("Instagram", "https://www.instagram.com/", "I", 0xFFE1306C, false),
+            new Web("TikTok", "https://www.tiktok.com/", "T", 0xFF3A3A4A, false),
+            new Web("Telegram", "https://web.telegram.org/k/", "T", 0xFF2AABEE, false),
+            new Web("Discord", "https://discord.com/app", "D", 0xFF5865F2, true),
+            new Web("Facebook", "https://m.facebook.com/", "F", 0xFF1877F2, false),
+            new Web("Buscar", "https://www.google.com/", "G", 0xFF4285F4, false),
+    };
+
     private static final App[] APPS = {
+            new App("Lark Player", "com.dywx.larkplayer", "L", 0xFFFF5A5F),
             new App("WhatsApp", "com.whatsapp", "W", 0xFF25D366),
             new App("WA Business", "com.whatsapp.w4b", "B", 0xFF128C7E),
             new App("Spotify", "com.spotify.music", "S", 0xFF1DB954),
@@ -77,6 +119,12 @@ public class OverlayService extends Service {
     private View panel;
     private WindowManager.LayoutParams bubbleLp;
     private int bubbleSize;
+
+    // Ventana chica
+    private View mini;
+    private WebView miniWeb;
+    private WindowManager.LayoutParams miniLp;
+    private boolean miniFocusable = false;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -108,6 +156,7 @@ public class OverlayService extends Service {
     @Override
     public void onDestroy() {
         hidePanel();
+        hideMini();
         if (bubble != null) {
             try {
                 wm.removeView(bubble);
@@ -124,6 +173,7 @@ public class OverlayService extends Service {
         super.onConfigurationChanged(newConfig);
         hidePanel();
         if (bubble != null) snapBubble();
+        if (mini != null) layoutMini(true);
     }
 
     @Override
@@ -183,8 +233,6 @@ public class OverlayService extends Service {
         bubbleSize = Ui.dp(this, 48);
 
         Ui.IconView icon = new Ui.IconView(this, Ui.IconView.PAD);
-        int pad = Ui.dp(this, 9);
-        icon.setPadding(pad, pad, pad, pad);
         icon.setBackground(Ui.oval(0xFF7C5CFF, 0xFF2B1A66));
         icon.setAlpha(0.88f);
         bubble = icon;
@@ -266,16 +314,28 @@ public class OverlayService extends Service {
         DisplayMetrics dm = metrics();
         int width = Math.min(dm.widthPixels - Ui.dp(this, 32), Ui.dp(this, 320));
 
-        panel = buildPanel();
+        LinearLayout content = buildPanelContent();
+        ScrollView sv = new ScrollView(this);
+        GradientDrawable bg = Ui.rounded(0xF0151326, Ui.dp(this, 22));
+        bg.setStroke(Ui.dp(this, 1), 0x33FFFFFF);
+        sv.setBackground(bg);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.addView(content);
+
+        content.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int height = Math.min(content.getMeasuredHeight(), (int) (dm.heightPixels * 0.88f));
+
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                width, WindowManager.LayoutParams.WRAP_CONTENT, overlayType(),
+                width, height, overlayType(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.CENTER;
 
-        panel.setOnTouchListener(new View.OnTouchListener() {
+        sv.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent e) {
                 if (e.getAction() == MotionEvent.ACTION_OUTSIDE) hidePanel();
@@ -283,6 +343,7 @@ public class OverlayService extends Service {
             }
         });
 
+        panel = sv;
         try {
             wm.addView(panel, lp);
         } catch (Exception ex) {
@@ -300,14 +361,11 @@ public class OverlayService extends Service {
         }
     }
 
-    private View buildPanel() {
+    private LinearLayout buildPanelContent() {
         final Context c = this;
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(Ui.dp(c, 14), Ui.dp(c, 12), Ui.dp(c, 14), Ui.dp(c, 12));
-        GradientDrawable bg = Ui.rounded(0xF0151326, Ui.dp(c, 22));
-        bg.setStroke(Ui.dp(c, 1), 0x33FFFFFF);
-        root.setBackground(bg);
 
         // Encabezado
         LinearLayout header = new LinearLayout(c);
@@ -331,7 +389,7 @@ public class OverlayService extends Service {
         header.addView(close, new LinearLayout.LayoutParams(Ui.dp(c, 30), Ui.dp(c, 30)));
         root.addView(header);
 
-        // Controles de música (funcionan con Spotify y cualquier reproductor)
+        // Controles de música (funcionan con Lark Player, Spotify y cualquier reproductor)
         LinearLayout media = new LinearLayout(c);
         media.setOrientation(LinearLayout.HORIZONTAL);
         media.setGravity(Gravity.CENTER);
@@ -344,42 +402,33 @@ public class OverlayService extends Service {
         mlp.topMargin = Ui.dp(c, 10);
         root.addView(media, mlp);
 
-        // Apps instaladas
-        List<App> installed = new ArrayList<>();
-        for (App a : APPS) {
-            if (getPackageManager().getLaunchIntentForPackage(a.pkg) != null) installed.add(a);
-        }
-
-        if (installed.isEmpty()) {
-            TextView none = new TextView(c);
-            none.setText("No encontré apps compatibles instaladas");
-            none.setTextColor(0xFFB8B4D8);
-            none.setTextSize(12);
-            none.setGravity(Gravity.CENTER);
-            none.setPadding(0, Ui.dp(c, 16), 0, Ui.dp(c, 16));
-            root.addView(none);
-        } else {
-            final int cols = 4;
-            LinearLayout row = null;
-            for (int i = 0; i < installed.size(); i++) {
-                if (i % cols == 0) {
-                    row = new LinearLayout(c);
-                    row.setOrientation(LinearLayout.HORIZONTAL);
-                    LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT);
-                    rlp.topMargin = Ui.dp(c, 10);
-                    root.addView(row, rlp);
+        // Ventana chica
+        root.addView(sectionLabel("EN VENTANA CHICA"));
+        List<View> webTiles = new ArrayList<>();
+        for (final Web w : WEBS) {
+            webTiles.add(tile(w.name, w.letter, w.color, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMini(w);
                 }
-                row.addView(appTile(installed.get(i)),
-                        new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-            }
-            // Rellena la última fila para que las columnas queden alineadas
-            int rest = (cols - installed.size() % cols) % cols;
-            for (int i = 0; i < rest; i++) {
-                row.addView(new View(c),
-                        new LinearLayout.LayoutParams(0, 1, 1f));
-            }
+            }));
+        }
+        addGrid(root, webTiles);
+
+        // Apps instaladas (pantalla completa)
+        List<View> appTiles = new ArrayList<>();
+        for (final App a : APPS) {
+            if (getPackageManager().getLaunchIntentForPackage(a.pkg) == null) continue;
+            appTiles.add(tile(a.name, a.letter, a.color, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    launch(a.pkg);
+                }
+            }));
+        }
+        if (!appTiles.isEmpty()) {
+            root.addView(sectionLabel("APP COMPLETA"));
+            addGrid(root, appTiles);
         }
 
         // Pie
@@ -388,7 +437,7 @@ public class OverlayService extends Service {
         stop.setTextSize(12);
         stop.setTextColor(0xFFFF7A8A);
         stop.setGravity(Gravity.CENTER);
-        stop.setPadding(0, Ui.dp(c, 10), 0, Ui.dp(c, 2));
+        stop.setPadding(0, Ui.dp(c, 12), 0, Ui.dp(c, 2));
         stop.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -400,6 +449,41 @@ public class OverlayService extends Service {
         return root;
     }
 
+    private TextView sectionLabel(String s) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(10);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setLetterSpacing(0.12f);
+        t.setTextColor(0xFF7E7AA3);
+        t.setPadding(Ui.dp(this, 2), Ui.dp(this, 14), 0, 0);
+        return t;
+    }
+
+    private void addGrid(LinearLayout root, List<View> tiles) {
+        final int cols = 4;
+        LinearLayout row = null;
+        for (int i = 0; i < tiles.size(); i++) {
+            if (i % cols == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                rlp.topMargin = Ui.dp(this, 6);
+                root.addView(row, rlp);
+            }
+            row.addView(tiles.get(i),
+                    new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        if (row != null) {
+            int rest = (cols - tiles.size() % cols) % cols;
+            for (int i = 0; i < rest; i++) {
+                row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+            }
+        }
+    }
+
     private View mediaButton(int iconType, final int keyCode) {
         Ui.IconView v = new Ui.IconView(this, iconType);
         v.setOnClickListener(new View.OnClickListener() {
@@ -408,12 +492,11 @@ public class OverlayService extends Service {
                 sendMediaKey(keyCode);
             }
         });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, Ui.dp(this, 46), 1f);
-        v.setLayoutParams(lp);
+        v.setLayoutParams(new LinearLayout.LayoutParams(0, Ui.dp(this, 46), 1f));
         return v;
     }
 
-    private View appTile(final App app) {
+    private View tile(String name, String letter, int color, View.OnClickListener click) {
         final Context c = this;
         LinearLayout tile = new LinearLayout(c);
         tile.setOrientation(LinearLayout.VERTICAL);
@@ -421,16 +504,16 @@ public class OverlayService extends Service {
         tile.setPadding(Ui.dp(c, 2), Ui.dp(c, 4), Ui.dp(c, 2), Ui.dp(c, 4));
 
         TextView circle = new TextView(c);
-        circle.setText(app.letter);
+        circle.setText(letter);
         circle.setTextColor(0xFFFFFFFF);
         circle.setTextSize(18);
         circle.setTypeface(Typeface.DEFAULT_BOLD);
         circle.setGravity(Gravity.CENTER);
-        circle.setBackground(Ui.oval(app.color, app.color));
+        circle.setBackground(Ui.oval(color, color));
         tile.addView(circle, new LinearLayout.LayoutParams(Ui.dp(c, 44), Ui.dp(c, 44)));
 
         TextView label = new TextView(c);
-        label.setText(app.name);
+        label.setText(name);
         label.setTextSize(10);
         label.setTextColor(0xFFD7D4EE);
         label.setSingleLine(true);
@@ -440,13 +523,206 @@ public class OverlayService extends Service {
         llp.topMargin = Ui.dp(c, 4);
         tile.addView(label, llp);
 
-        tile.setOnClickListener(new View.OnClickListener() {
+        tile.setOnClickListener(click);
+        return tile;
+    }
+
+    // ------------------------------------------------------------------ ventana chica
+
+    private void showMini(Web web) {
+        hidePanel();
+        hideMini();
+        final Context c = this;
+
+        LinearLayout root = new LinearLayout(c);
+        root.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = Ui.rounded(0xFF151326, Ui.dp(c, 16));
+        bg.setStroke(Ui.dp(c, 1), 0x55FFFFFF);
+        root.setBackground(bg);
+
+        // Barra de arriba: sirve para arrastrar la ventana
+        TextView top = new TextView(c);
+        top.setText(web.name.toUpperCase() + "  •  arrastra aquí");
+        top.setTextSize(10);
+        top.setTypeface(Typeface.DEFAULT_BOLD);
+        top.setLetterSpacing(0.08f);
+        top.setTextColor(0xFF9D8CFF);
+        top.setGravity(Gravity.CENTER);
+        root.addView(top, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(c, 28)));
+
+        // Contenido
+        miniWeb = new WebView(c);
+        WebSettings s = miniWeb.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
+        s.setSupportZoom(true);
+        s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        if (web.desktop) s.setUserAgentString(UA_DESKTOP);
+        try {
+            CookieManager.getInstance().setAcceptCookie(true);
+            CookieManager.getInstance().setAcceptThirdPartyCookies(miniWeb, true);
+        } catch (Exception ignored) {
+        }
+        miniWeb.setBackgroundColor(0xFF0F0D1C);
+        miniWeb.setWebViewClient(new WebViewClient());
+        miniWeb.setFocusable(true);
+        miniWeb.setFocusableInTouchMode(true);
+        // Al tocar la página se activa el teclado; al tocar fuera, vuelve al juego.
+        miniWeb.setOnTouchListener(new View.OnTouchListener() {
             @Override
-            public void onClick(View v) {
-                launch(app.pkg);
+            public boolean onTouch(View v, MotionEvent e) {
+                if (e.getAction() == MotionEvent.ACTION_DOWN) setMiniFocusable(true);
+                return false;
             }
         });
-        return tile;
+        miniWeb.loadUrl(web.url);
+        root.addView(miniWeb, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // Barra de abajo con la X para cerrar
+        LinearLayout bottom = new LinearLayout(c);
+        bottom.setGravity(Gravity.CENTER);
+        Ui.IconView x = new Ui.IconView(c, Ui.IconView.CLOSE);
+        x.setBackground(Ui.oval(0xFFE5484D, 0xFFB3263B));
+        x.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                hideMini();
+            }
+        });
+        bottom.addView(x, new LinearLayout.LayoutParams(Ui.dp(c, 34), Ui.dp(c, 34)));
+        root.addView(bottom, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(c, 46)));
+
+        miniFocusable = false;
+        miniLp = new WindowManager.LayoutParams(
+                100, 100, overlayType(),
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                PixelFormat.TRANSLUCENT);
+        miniLp.gravity = Gravity.TOP | Gravity.START;
+        miniLp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN;
+
+        root.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                if (e.getAction() == MotionEvent.ACTION_OUTSIDE) setMiniFocusable(false);
+                return false;
+            }
+        });
+
+        // Arrastrar la ventana desde la barra de arriba
+        top.setOnTouchListener(new View.OnTouchListener() {
+            int startX, startY;
+            float downX, downY;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startX = miniLp.x;
+                        startY = miniLp.y;
+                        downX = e.getRawX();
+                        downY = e.getRawY();
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        DisplayMetrics dm = metrics();
+                        int nx = startX + (int) (e.getRawX() - downX);
+                        int ny = startY + (int) (e.getRawY() - downY);
+                        miniLp.x = Math.max(0, Math.min(nx, dm.widthPixels - miniLp.width));
+                        miniLp.y = Math.max(0, Math.min(ny, dm.heightPixels - miniLp.height));
+                        try {
+                            wm.updateViewLayout(mini, miniLp);
+                        } catch (Exception ignored) {
+                        }
+                        return true;
+                    default:
+                        return true;
+                }
+            }
+        });
+
+        mini = root;
+        layoutMini(false);
+        try {
+            wm.addView(mini, miniLp);
+        } catch (Exception ex) {
+            mini = null;
+            destroyMiniWeb();
+        }
+    }
+
+    /**
+     * Tamaño de la ventana: ni mitad ni diminuta.
+     * Vertical: casi todo el ancho y poco más de la mitad del alto.
+     * Horizontal (jugando): un poco más de la mitad del ancho y casi todo el alto.
+     */
+    private void layoutMini(boolean update) {
+        DisplayMetrics dm = metrics();
+        boolean land = dm.widthPixels > dm.heightPixels;
+        miniLp.width = (int) (dm.widthPixels * (land ? 0.55f : 0.92f));
+        miniLp.height = (int) (dm.heightPixels * (land ? 0.82f : 0.55f));
+        miniLp.x = (dm.widthPixels - miniLp.width) / 2;
+        miniLp.y = (dm.heightPixels - miniLp.height) / 2;
+        if (update) {
+            try {
+                wm.updateViewLayout(mini, miniLp);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** Activa o desactiva el teclado. Sin foco, el juego sigue recibiendo el control. */
+    private void setMiniFocusable(boolean focusable) {
+        if (mini == null || focusable == miniFocusable) return;
+        miniFocusable = focusable;
+        if (focusable) {
+            miniLp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        } else {
+            try {
+                InputMethodManager imm =
+                        (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                imm.hideSoftInputFromWindow(mini.getWindowToken(), 0);
+            } catch (Exception ignored) {
+            }
+            miniLp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        }
+        try {
+            wm.updateViewLayout(mini, miniLp);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void hideMini() {
+        if (mini != null) {
+            try {
+                wm.removeView(mini);
+            } catch (Exception ignored) {
+            }
+            mini = null;
+        }
+        destroyMiniWeb();
+    }
+
+    private void destroyMiniWeb() {
+        if (miniWeb != null) {
+            try {
+                miniWeb.stopLoading();
+                miniWeb.loadUrl("about:blank");
+                if (miniWeb.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) miniWeb.getParent()).removeView(miniWeb);
+                }
+                miniWeb.destroy();
+            } catch (Exception ignored) {
+            }
+            miniWeb = null;
+        }
     }
 
     // ------------------------------------------------------------------ acciones
@@ -461,8 +737,8 @@ public class OverlayService extends Service {
     }
 
     /**
-     * Abre la app. Si el sistema soporta ventanas flotantes (modo freeform) la abre
-     * en una ventana; si no, la abre normal y se vuelve al juego con el botón de recientes.
+     * Abre la app instalada a pantalla completa. Si el sistema soporta ventanas
+     * flotantes (modo freeform) la abre en una ventana de ese tamaño.
      */
     private void launch(String pkg) {
         Intent i = getPackageManager().getLaunchIntentForPackage(pkg);

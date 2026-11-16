@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
         tlp.topMargin = Ui.dp(this, 20);
         root.addView(title, tlp);
 
-        TextView sub = text("Una burbuja flotante para abrir WhatsApp, Spotify y más mientras juegas.",
+        TextView sub = text("Una burbuja flotante para abrir WhatsApp, YouTube, Spotify y más en una ventana chica mientras juegas.",
                 14, 0xFFB8B4D8, false);
         sub.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams slp = wrap();
