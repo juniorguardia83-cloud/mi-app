@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícono: solo un control de consola sobre fondo violeta oscuro -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Fondo -->
+    <path
+        android:fillColor="#2B1A66"
+        android:pathData="M24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 V24 A24,24 0 0 1 24,0 Z" />
+
+    <!-- Cuerpo del control -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,36 H70 A14,14 0 0 1 84,50 V56 A14,14 0 0 1 70,70 H38 A14,14 0 0 1 24,56 V50 A14,14 0 0 1 38,36 Z" />
+    <!-- Agarraderas -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,66 A10,10 0 1 0 44,66 A10,10 0 1 0 24,66 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M64,66 A10,10 0 1 0 84,66 A10,10 0 1 0 64,66 Z" />
+
+    <!-- Cruceta -->
+    <path
+        android:fillColor="#2B1A66"
+        android:pathData="M33,50 H47 V54 H33 Z" />
+    <path
+        android:fillColor="#2B1A66"
+        android:pathData="M38,45 H42 V59 H38 Z" />
+
+    <!-- Botones -->
+    <path
+        android:fillColor="#7C5CFF"
+        android:pathData="M65,48 A3.5,3.5 0 1 0 72,48 A3.5,3.5 0 1 0 65,48 Z" />
+    <path
+        android:fillColor="#00D1FF"
+        android:pathData="M71,56 A3.5,3.5 0 1 0 78,56 A3.5,3.5 0 1 0 71,56 Z" />
+</vector>
