@@ -1,51 +1,59 @@
 package com.gamerpanel;
 
-import android.app.ActivityOptions;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.RemoteInput;
 import android.app.Service;
 import android.content.ComponentCallbacks2;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
-import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Icon;
 import android.media.AudioManager;
+import android.media.MediaMetadata;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.provider.Settings;
+import android.text.InputType;
+import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
-import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
-import android.webkit.CookieManager;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Burbuja flotante con forma de control de consola. Al tocarla se abre un panel.
- * Desde el panel se abren las apps en una VENTANA CHICA flotante (con una X abajo
- * para cerrarla), arrastrable, encima del juego.
- * Pensado para gastar poca RAM: el panel y la ventana se crean al abrirlos y se
- * destruyen al cerrarlos.
+ * Desde el panel se abren ventanas chicas (con una X abajo, arrastrables y con el
+ * tamaño ajustable) para la música (Lark Player, Spotify...) y los mensajes
+ * (WhatsApp, Telegram...), conectadas a las apps del celular sin iniciar sesión.
  */
 public class OverlayService extends Service {
 
@@ -53,68 +61,38 @@ public class OverlayService extends Service {
     private static final String CHANNEL_ID = "panel_gamer";
     private static final int NOTIF_ID = 1;
 
-    private static final String UA_DESKTOP =
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                    + "Chrome/140.0.0.0 Safari/537.36";
-
     static volatile boolean running = false;
 
-    /** App que se abre en pantalla completa (la app instalada). */
-    private static final class App {
-        final String name, pkg, letter;
+    /** Un acceso del panel. */
+    private static final class Item {
+        final String name, letter;
         final int color;
+        final String[] pkgs;
 
-        App(String name, String pkg, String letter, int color) {
+        Item(String name, String letter, int color, String... pkgs) {
             this.name = name;
-            this.pkg = pkg;
             this.letter = letter;
             this.color = color;
+            this.pkgs = pkgs;
         }
     }
 
-    /** App que se abre en la ventana chica (versión web). */
-    private static final class Web {
-        final String name, url, letter;
-        final int color;
-        final boolean desktop;
-
-        Web(String name, String url, String letter, int color, boolean desktop) {
-            this.name = name;
-            this.url = url;
-            this.letter = letter;
-            this.color = color;
-            this.desktop = desktop;
-        }
-    }
-
-    private static final Web[] WEBS = {
-            new Web("WhatsApp", "https://web.whatsapp.com/", "W", 0xFF25D366, true),
-            new Web("YouTube", "https://m.youtube.com/", "Y", 0xFFE62117, false),
-            new Web("Spotify", "https://open.spotify.com/", "S", 0xFF1DB954, true),
-            new Web("Instagram", "https://www.instagram.com/", "I", 0xFFE1306C, false),
-            new Web("TikTok", "https://www.tiktok.com/", "T", 0xFF3A3A4A, false),
-            new Web("Telegram", "https://web.telegram.org/k/", "T", 0xFF2AABEE, false),
-            new Web("Discord", "https://discord.com/app", "D", 0xFF5865F2, true),
-            new Web("Facebook", "https://m.facebook.com/", "F", 0xFF1877F2, false),
-            new Web("Buscar", "https://www.google.com/", "G", 0xFF4285F4, false),
+    private static final Item[] MUSIC = {
+            new Item("Lark Player", "L", 0xFFFF5A5F, "com.dywx.larkplayer"),
+            new Item("Spotify", "S", 0xFF1DB954, "com.spotify.music"),
+            new Item("YT Music", "Y", 0xFFE62117, "com.google.android.apps.youtube.music"),
     };
 
-    private static final App[] APPS = {
-            new App("Lark Player", "com.dywx.larkplayer", "L", 0xFFFF5A5F),
-            new App("WhatsApp", "com.whatsapp", "W", 0xFF25D366),
-            new App("WA Business", "com.whatsapp.w4b", "B", 0xFF128C7E),
-            new App("Spotify", "com.spotify.music", "S", 0xFF1DB954),
-            new App("YouTube", "com.google.android.youtube", "Y", 0xFFE62117),
-            new App("TikTok", "com.zhiliaoapp.musically", "T", 0xFF3A3A4A),
-            new App("Instagram", "com.instagram.android", "I", 0xFFE1306C),
-            new App("Messenger", "com.facebook.orca", "M", 0xFF0084FF),
-            new App("Facebook", "com.facebook.katana", "F", 0xFF1877F2),
-            new App("Discord", "com.discord", "D", 0xFF5865F2),
-            new App("Telegram", "org.telegram.messenger", "T", 0xFF2AABEE),
-            new App("Chrome", "com.android.chrome", "C", 0xFF4285F4),
+    private static final Item[] CHATS = {
+            new Item("WhatsApp", "W", 0xFF25D366, "com.whatsapp", "com.whatsapp.w4b"),
+            new Item("Telegram", "T", 0xFF2AABEE, "org.telegram.messenger"),
+            new Item("Messenger", "M", 0xFF0084FF, "com.facebook.orca"),
+            new Item("Instagram", "I", 0xFFE1306C, "com.instagram.android"),
+            new Item("Discord", "D", 0xFF5865F2, "com.discord"),
     };
 
     private WindowManager wm;
+    private SharedPreferences prefs;
     private View bubble;
     private View panel;
     private WindowManager.LayoutParams bubbleLp;
@@ -122,9 +100,11 @@ public class OverlayService extends Service {
 
     // Ventana chica
     private View mini;
-    private WebView miniWeb;
     private WindowManager.LayoutParams miniLp;
     private boolean miniFocusable = false;
+    private Runnable miniCleanup;
+    private String miniKind = "";
+    private float[] miniDef = {0.8f, 0.4f, 0.45f, 0.72f};
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -135,6 +115,7 @@ public class OverlayService extends Service {
     public void onCreate() {
         super.onCreate();
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        prefs = getSharedPreferences("panel", MODE_PRIVATE);
         running = true;
     }
 
@@ -206,7 +187,7 @@ public class OverlayService extends Service {
 
         b.setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentTitle("Panel Gamer activo")
-                .setContentText("Toca la burbuja para abrir tus apps")
+                .setContentText("Toca la burbuja para abrir el panel")
                 .setContentIntent(open)
                 .setOngoing(true)
                 .addAction(new Notification.Action.Builder(
@@ -361,6 +342,13 @@ public class OverlayService extends Service {
         }
     }
 
+    private boolean installed(String... pkgs) {
+        for (String p : pkgs) {
+            if (getPackageManager().getLaunchIntentForPackage(p) != null) return true;
+        }
+        return false;
+    }
+
     private LinearLayout buildPanelContent() {
         final Context c = this;
         LinearLayout root = new LinearLayout(c);
@@ -380,56 +368,31 @@ public class OverlayService extends Service {
         header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Ui.IconView close = new Ui.IconView(c, Ui.IconView.CLOSE);
         close.setIconColor(0xFFB8B4D8);
-        close.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                hidePanel();
-            }
-        });
+        close.setOnClickListener(v -> hidePanel());
         header.addView(close, new LinearLayout.LayoutParams(Ui.dp(c, 30), Ui.dp(c, 30)));
         root.addView(header);
 
-        // Controles de música (funcionan con Lark Player, Spotify y cualquier reproductor)
-        LinearLayout media = new LinearLayout(c);
-        media.setOrientation(LinearLayout.HORIZONTAL);
-        media.setGravity(Gravity.CENTER);
-        media.setBackground(Ui.rounded(0x1AFFFFFF, Ui.dp(c, 18)));
-        media.addView(mediaButton(Ui.IconView.PREV, KeyEvent.KEYCODE_MEDIA_PREVIOUS));
-        media.addView(mediaButton(Ui.IconView.PLAY, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE));
-        media.addView(mediaButton(Ui.IconView.NEXT, KeyEvent.KEYCODE_MEDIA_NEXT));
-        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        mlp.topMargin = Ui.dp(c, 10);
-        root.addView(media, mlp);
+        // Música
+        root.addView(sectionLabel("MÚSICA"));
+        List<View> music = new ArrayList<>();
+        music.add(tile("Música", "♪", 0xFF7C5CFF, v -> openMusic(null, "Música")));
+        for (final Item it : MUSIC) {
+            if (!installed(it.pkgs)) continue;
+            music.add(tile(it.name, it.letter, it.color, v -> openMusic(it.pkgs[0], it.name)));
+        }
+        addGrid(root, music);
 
-        // Ventana chica
-        root.addView(sectionLabel("EN VENTANA CHICA"));
-        List<View> webTiles = new ArrayList<>();
-        for (final Web w : WEBS) {
-            webTiles.add(tile(w.name, w.letter, w.color, new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showMini(w);
-                }
-            }));
+        // Mensajes
+        root.addView(sectionLabel("MENSAJES"));
+        List<View> chats = new ArrayList<>();
+        chats.add(tile("Todos", "✉", 0xFF7C5CFF, v -> openMessages(null, "Mensajes")));
+        for (final Item it : CHATS) {
+            if (!installed(it.pkgs)) continue;
+            final Set<String> set = new HashSet<>();
+            for (String p : it.pkgs) set.add(p);
+            chats.add(tile(it.name, it.letter, it.color, v -> openMessages(set, it.name)));
         }
-        addGrid(root, webTiles);
-
-        // Apps instaladas (pantalla completa)
-        List<View> appTiles = new ArrayList<>();
-        for (final App a : APPS) {
-            if (getPackageManager().getLaunchIntentForPackage(a.pkg) == null) continue;
-            appTiles.add(tile(a.name, a.letter, a.color, new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    launch(a.pkg);
-                }
-            }));
-        }
-        if (!appTiles.isEmpty()) {
-            root.addView(sectionLabel("APP COMPLETA"));
-            addGrid(root, appTiles);
-        }
+        addGrid(root, chats);
 
         // Pie
         TextView stop = new TextView(c);
@@ -438,12 +401,7 @@ public class OverlayService extends Service {
         stop.setTextColor(0xFFFF7A8A);
         stop.setGravity(Gravity.CENTER);
         stop.setPadding(0, Ui.dp(c, 12), 0, Ui.dp(c, 2));
-        stop.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                stopSelf();
-            }
-        });
+        stop.setOnClickListener(v -> stopSelf());
         root.addView(stop);
 
         return root;
@@ -484,18 +442,6 @@ public class OverlayService extends Service {
         }
     }
 
-    private View mediaButton(int iconType, final int keyCode) {
-        Ui.IconView v = new Ui.IconView(this, iconType);
-        v.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                sendMediaKey(keyCode);
-            }
-        });
-        v.setLayoutParams(new LinearLayout.LayoutParams(0, Ui.dp(this, 46), 1f));
-        return v;
-    }
-
     private View tile(String name, String letter, int color, View.OnClickListener click) {
         final Context c = this;
         LinearLayout tile = new LinearLayout(c);
@@ -529,10 +475,35 @@ public class OverlayService extends Service {
 
     // ------------------------------------------------------------------ ventana chica
 
-    private void showMini(Web web) {
+    private void openMusic(String preferPkg, String title) {
         hidePanel();
         hideMini();
+        if (!NotifService.isEnabled(this)) {
+            openWindow("perm", title, permissionView(), null, 0.8f, 0.36f, 0.45f, 0.72f);
+            return;
+        }
+        final MusicUi ui = new MusicUi(preferPkg);
+        openWindow("music", title, ui.view, ui::cleanup, 0.8f, 0.36f, 0.44f, 0.72f);
+    }
+
+    private void openMessages(Set<String> pkgs, String title) {
+        hidePanel();
+        hideMini();
+        if (!NotifService.isEnabled(this)) {
+            openWindow("perm", title, permissionView(), null, 0.8f, 0.36f, 0.45f, 0.72f);
+            return;
+        }
+        final MessagesUi ui = new MessagesUi(pkgs != null ? pkgs : NotifService.MSG_PKGS);
+        openWindow("msg", title, ui.holder, ui::cleanup, 0.8f, 0.42f, 0.46f, 0.74f);
+    }
+
+    /** Ventana con barra para arrastrar, contenido, X abajo y esquina para cambiar el tamaño. */
+    private void openWindow(String kind, String title, View content, Runnable cleanup,
+                            float pw, float ph, float lw, float lh) {
         final Context c = this;
+        miniKind = kind;
+        miniDef = new float[]{pw, ph, lw, lh};
+        miniCleanup = cleanup;
 
         LinearLayout root = new LinearLayout(c);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -542,7 +513,7 @@ public class OverlayService extends Service {
 
         // Barra de arriba: sirve para arrastrar la ventana
         TextView top = new TextView(c);
-        top.setText(web.name.toUpperCase() + "  •  arrastra aquí");
+        top.setText(title.toUpperCase() + "  •  arrastra aquí");
         top.setTextSize(10);
         top.setTypeface(Typeface.DEFAULT_BOLD);
         top.setLetterSpacing(0.08f);
@@ -551,53 +522,25 @@ public class OverlayService extends Service {
         root.addView(top, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(c, 28)));
 
-        // Contenido
-        miniWeb = new WebView(c);
-        WebSettings s = miniWeb.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setLoadWithOverviewMode(true);
-        s.setUseWideViewPort(true);
-        s.setSupportZoom(true);
-        s.setBuiltInZoomControls(true);
-        s.setDisplayZoomControls(false);
-        s.setMediaPlaybackRequiresUserGesture(false);
-        if (web.desktop) s.setUserAgentString(UA_DESKTOP);
-        try {
-            CookieManager.getInstance().setAcceptCookie(true);
-            CookieManager.getInstance().setAcceptThirdPartyCookies(miniWeb, true);
-        } catch (Exception ignored) {
-        }
-        miniWeb.setBackgroundColor(0xFF0F0D1C);
-        miniWeb.setWebViewClient(new WebViewClient());
-        miniWeb.setFocusable(true);
-        miniWeb.setFocusableInTouchMode(true);
-        // Al tocar la página se activa el teclado; al tocar fuera, vuelve al juego.
-        miniWeb.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent e) {
-                if (e.getAction() == MotionEvent.ACTION_DOWN) setMiniFocusable(true);
-                return false;
-            }
-        });
-        miniWeb.loadUrl(web.url);
-        root.addView(miniWeb, new LinearLayout.LayoutParams(
+        root.addView(content, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        // Barra de abajo con la X para cerrar
-        LinearLayout bottom = new LinearLayout(c);
-        bottom.setGravity(Gravity.CENTER);
+        // Barra de abajo: X para cerrar y esquina para ajustar el tamaño
+        FrameLayout bottom = new FrameLayout(c);
         Ui.IconView x = new Ui.IconView(c, Ui.IconView.CLOSE);
         x.setBackground(Ui.oval(0xFFE5484D, 0xFFB3263B));
-        x.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                hideMini();
-            }
-        });
-        bottom.addView(x, new LinearLayout.LayoutParams(Ui.dp(c, 34), Ui.dp(c, 34)));
+        x.setOnClickListener(v -> hideMini());
+        FrameLayout.LayoutParams xlp = new FrameLayout.LayoutParams(Ui.dp(c, 32), Ui.dp(c, 32));
+        xlp.gravity = Gravity.CENTER;
+        bottom.addView(x, xlp);
+
+        Ui.IconView grip = new Ui.IconView(c, Ui.IconView.GRIP);
+        grip.setIconColor(0xFFB8B4D8);
+        FrameLayout.LayoutParams glp = new FrameLayout.LayoutParams(Ui.dp(c, 34), Ui.dp(c, 34));
+        glp.gravity = Gravity.END | Gravity.BOTTOM;
+        bottom.addView(grip, glp);
         root.addView(bottom, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(c, 46)));
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(c, 40)));
 
         miniFocusable = false;
         miniLp = new WindowManager.LayoutParams(
@@ -609,12 +552,10 @@ public class OverlayService extends Service {
         miniLp.gravity = Gravity.TOP | Gravity.START;
         miniLp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN;
 
-        root.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent e) {
-                if (e.getAction() == MotionEvent.ACTION_OUTSIDE) setMiniFocusable(false);
-                return false;
-            }
+        // Tocar fuera: se quita el teclado y el juego vuelve a recibir los toques
+        root.setOnTouchListener((v, e) -> {
+            if (e.getAction() == MotionEvent.ACTION_OUTSIDE) setMiniFocusable(false);
+            return false;
         });
 
         // Arrastrar la ventana desde la barra de arriba
@@ -637,10 +578,45 @@ public class OverlayService extends Service {
                         int ny = startY + (int) (e.getRawY() - downY);
                         miniLp.x = Math.max(0, Math.min(nx, dm.widthPixels - miniLp.width));
                         miniLp.y = Math.max(0, Math.min(ny, dm.heightPixels - miniLp.height));
-                        try {
-                            wm.updateViewLayout(mini, miniLp);
-                        } catch (Exception ignored) {
-                        }
+                        applyMini();
+                        return true;
+                    default:
+                        return true;
+                }
+            }
+        });
+
+        // Cambiar el tamaño desde la esquina de abajo a la derecha
+        grip.setOnTouchListener(new View.OnTouchListener() {
+            int startW, startH;
+            float downX, downY;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                DisplayMetrics dm = metrics();
+                switch (e.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startW = miniLp.width;
+                        startH = miniLp.height;
+                        downX = e.getRawX();
+                        downY = e.getRawY();
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        int nw = startW + (int) (e.getRawX() - downX);
+                        int nh = startH + (int) (e.getRawY() - downY);
+                        miniLp.width = Math.max(Ui.dp(OverlayService.this, 190),
+                                Math.min(nw, dm.widthPixels - miniLp.x));
+                        miniLp.height = Math.max(Ui.dp(OverlayService.this, 170),
+                                Math.min(nh, dm.heightPixels - miniLp.y));
+                        applyMini();
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        boolean land = dm.widthPixels > dm.heightPixels;
+                        prefs.edit()
+                                .putFloat(prefKey(land, "w"), miniLp.width / (float) dm.widthPixels)
+                                .putFloat(prefKey(land, "h"), miniLp.height / (float) dm.heightPixels)
+                                .apply();
                         return true;
                     default:
                         return true;
@@ -654,27 +630,32 @@ public class OverlayService extends Service {
             wm.addView(mini, miniLp);
         } catch (Exception ex) {
             mini = null;
-            destroyMiniWeb();
+            runCleanup();
         }
     }
 
-    /**
-     * Tamaño de la ventana: ni mitad ni diminuta.
-     * Vertical: casi todo el ancho y poco más de la mitad del alto.
-     * Horizontal (jugando): un poco más de la mitad del ancho y casi todo el alto.
-     */
+    private String prefKey(boolean land, String part) {
+        return miniKind + (land ? "_l_" : "_p_") + part;
+    }
+
+    /** Tamaño: el que dejó el usuario, o uno chico por defecto (ni mitad ni pantalla entera). */
     private void layoutMini(boolean update) {
         DisplayMetrics dm = metrics();
         boolean land = dm.widthPixels > dm.heightPixels;
-        miniLp.width = (int) (dm.widthPixels * (land ? 0.55f : 0.92f));
-        miniLp.height = (int) (dm.heightPixels * (land ? 0.82f : 0.55f));
+        float fw = prefs.getFloat(prefKey(land, "w"), land ? miniDef[2] : miniDef[0]);
+        float fh = prefs.getFloat(prefKey(land, "h"), land ? miniDef[3] : miniDef[1]);
+        miniLp.width = Math.max(Ui.dp(this, 190), Math.min((int) (dm.widthPixels * fw), dm.widthPixels));
+        miniLp.height = Math.max(Ui.dp(this, 170), Math.min((int) (dm.heightPixels * fh), dm.heightPixels));
         miniLp.x = (dm.widthPixels - miniLp.width) / 2;
         miniLp.y = (dm.heightPixels - miniLp.height) / 2;
-        if (update) {
-            try {
-                wm.updateViewLayout(mini, miniLp);
-            } catch (Exception ignored) {
-            }
+        if (update) applyMini();
+    }
+
+    private void applyMini() {
+        if (mini == null) return;
+        try {
+            wm.updateViewLayout(mini, miniLp);
+        } catch (Exception ignored) {
         }
     }
 
@@ -693,10 +674,7 @@ public class OverlayService extends Service {
             }
             miniLp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         }
-        try {
-            wm.updateViewLayout(mini, miniLp);
-        } catch (Exception ignored) {
-        }
+        applyMini();
     }
 
     private void hideMini() {
@@ -707,25 +685,262 @@ public class OverlayService extends Service {
             }
             mini = null;
         }
-        destroyMiniWeb();
+        runCleanup();
     }
 
-    private void destroyMiniWeb() {
-        if (miniWeb != null) {
+    private void runCleanup() {
+        Runnable r = miniCleanup;
+        miniCleanup = null;
+        if (r != null) r.run();
+    }
+
+    private View permissionView() {
+        final Context c = this;
+        LinearLayout v = new LinearLayout(c);
+        v.setOrientation(LinearLayout.VERTICAL);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(Ui.dp(c, 16), Ui.dp(c, 8), Ui.dp(c, 16), Ui.dp(c, 8));
+
+        TextView msg = new TextView(c);
+        msg.setText("Falta dar \"Acceso a notificaciones\" a Panel Gamer. Así lee tu música y "
+                + "tus mensajes directo del celular, sin iniciar sesión.");
+        msg.setTextSize(12);
+        msg.setTextColor(0xFFD7D4EE);
+        msg.setGravity(Gravity.CENTER);
+        v.addView(msg);
+
+        TextView btn = new TextView(c);
+        btn.setText("Dar acceso");
+        btn.setTextSize(13);
+        btn.setTextColor(0xFFFFFFFF);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setGravity(Gravity.CENTER);
+        btn.setBackground(Ui.gradient(0xFF7C5CFF, 0xFF4C2FD6, Ui.dp(c, 14)));
+        btn.setOnClickListener(x -> {
+            hideMini();
             try {
-                miniWeb.stopLoading();
-                miniWeb.loadUrl("about:blank");
-                if (miniWeb.getParent() instanceof ViewGroup) {
-                    ((ViewGroup) miniWeb.getParent()).removeView(miniWeb);
-                }
-                miniWeb.destroy();
+                startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (Exception ignored) {
             }
-            miniWeb = null;
-        }
+        });
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                Ui.dp(c, 150), Ui.dp(c, 40));
+        blp.topMargin = Ui.dp(c, 12);
+        v.addView(btn, blp);
+        return v;
     }
 
-    // ------------------------------------------------------------------ acciones
+    // ------------------------------------------------------------------ música
+
+    /** Reproductor chico: se conecta a la app que esté sonando (Lark Player, Spotify...). */
+    private final class MusicUi {
+        final String prefer;
+        final MediaSessionManager msm;
+        final ComponentName cn;
+        MediaController ctrl;
+        final LinearLayout view;
+        final ImageView art;
+        final TextView tTitle, tArtist, tApp;
+        final Ui.IconView play;
+
+        final MediaController.Callback cb = new MediaController.Callback() {
+            @Override
+            public void onMetadataChanged(MediaMetadata metadata) {
+                bind();
+            }
+
+            @Override
+            public void onPlaybackStateChanged(PlaybackState state) {
+                bind();
+            }
+
+            @Override
+            public void onSessionDestroyed() {
+                pick();
+            }
+        };
+
+        final MediaSessionManager.OnActiveSessionsChangedListener sl =
+                new MediaSessionManager.OnActiveSessionsChangedListener() {
+                    @Override
+                    public void onActiveSessionsChanged(List<MediaController> controllers) {
+                        pick();
+                    }
+                };
+
+        MusicUi(String prefer) {
+            this.prefer = prefer;
+            final Context c = OverlayService.this;
+            msm = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
+            cn = new ComponentName(c, NotifService.class);
+
+            view = new LinearLayout(c);
+            view.setOrientation(LinearLayout.VERTICAL);
+            view.setGravity(Gravity.CENTER_VERTICAL);
+            view.setPadding(Ui.dp(c, 12), Ui.dp(c, 4), Ui.dp(c, 12), Ui.dp(c, 4));
+
+            LinearLayout info = new LinearLayout(c);
+            info.setOrientation(LinearLayout.HORIZONTAL);
+            info.setGravity(Gravity.CENTER_VERTICAL);
+
+            art = new ImageView(c);
+            art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            art.setBackground(Ui.rounded(0x22FFFFFF, Ui.dp(c, 10)));
+            info.addView(art, new LinearLayout.LayoutParams(Ui.dp(c, 56), Ui.dp(c, 56)));
+
+            LinearLayout texts = new LinearLayout(c);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            texts.setPadding(Ui.dp(c, 10), 0, 0, 0);
+            tTitle = text(c, 14, 0xFFFFFFFF, true);
+            tArtist = text(c, 12, 0xFFB8B4D8, false);
+            tApp = text(c, 10, 0xFF7E7AA3, false);
+            texts.addView(tTitle);
+            texts.addView(tArtist);
+            texts.addView(tApp);
+            info.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            view.addView(info);
+
+            LinearLayout controls = new LinearLayout(c);
+            controls.setOrientation(LinearLayout.HORIZONTAL);
+            controls.setGravity(Gravity.CENTER);
+            controls.setBackground(Ui.rounded(0x1AFFFFFF, Ui.dp(c, 18)));
+            Ui.IconView prev = new Ui.IconView(c, Ui.IconView.PREV);
+            play = new Ui.IconView(c, Ui.IconView.PLAY);
+            Ui.IconView next = new Ui.IconView(c, Ui.IconView.NEXT);
+            prev.setOnClickListener(v -> {
+                if (ctrl != null) ctrl.getTransportControls().skipToPrevious();
+                else sendMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS);
+            });
+            play.setOnClickListener(v -> {
+                if (ctrl == null) {
+                    sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE);
+                    return;
+                }
+                PlaybackState st = ctrl.getPlaybackState();
+                if (st != null && st.getState() == PlaybackState.STATE_PLAYING) {
+                    ctrl.getTransportControls().pause();
+                } else {
+                    ctrl.getTransportControls().play();
+                }
+            });
+            next.setOnClickListener(v -> {
+                if (ctrl != null) ctrl.getTransportControls().skipToNext();
+                else sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT);
+            });
+            controls.addView(prev, new LinearLayout.LayoutParams(0, Ui.dp(c, 46), 1f));
+            controls.addView(play, new LinearLayout.LayoutParams(0, Ui.dp(c, 46), 1f));
+            controls.addView(next, new LinearLayout.LayoutParams(0, Ui.dp(c, 46), 1f));
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            clp.topMargin = Ui.dp(c, 10);
+            view.addView(controls, clp);
+
+            try {
+                msm.addOnActiveSessionsChangedListener(sl, cn);
+            } catch (Exception ignored) {
+            }
+            pick();
+        }
+
+        private TextView text(Context c, float sp, int color, boolean bold) {
+            TextView t = new TextView(c);
+            t.setTextSize(sp);
+            t.setTextColor(color);
+            t.setSingleLine(true);
+            t.setEllipsize(TextUtils.TruncateAt.END);
+            if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
+            return t;
+        }
+
+        void pick() {
+            MediaController next = null;
+            try {
+                List<MediaController> l = msm.getActiveSessions(cn);
+                if (prefer != null) {
+                    for (MediaController m : l) {
+                        if (prefer.equals(m.getPackageName())) {
+                            next = m;
+                            break;
+                        }
+                    }
+                }
+                if (next == null) {
+                    for (MediaController m : l) {
+                        PlaybackState st = m.getPlaybackState();
+                        if (st != null && st.getState() == PlaybackState.STATE_PLAYING) {
+                            next = m;
+                            break;
+                        }
+                    }
+                }
+                if (next == null && !l.isEmpty()) next = l.get(0);
+            } catch (Exception ignored) {
+            }
+            try {
+                if (ctrl != null) ctrl.unregisterCallback(cb);
+            } catch (Exception ignored) {
+            }
+            ctrl = next;
+            if (ctrl != null) {
+                try {
+                    ctrl.registerCallback(cb);
+                } catch (Exception ignored) {
+                }
+            }
+            bind();
+        }
+
+        void bind() {
+            if (ctrl == null) {
+                tTitle.setText("Sin música activa");
+                tArtist.setText("Dale play a tu reproductor una vez");
+                tApp.setText("");
+                art.setImageDrawable(null);
+                play.setType(Ui.IconView.PLAY);
+                return;
+            }
+            String title = null, artist = null;
+            Bitmap bmp = null;
+            MediaMetadata md = ctrl.getMetadata();
+            if (md != null) {
+                title = md.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE);
+                if (title == null) title = md.getString(MediaMetadata.METADATA_KEY_TITLE);
+                artist = md.getString(MediaMetadata.METADATA_KEY_ARTIST);
+                if (artist == null) artist = md.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE);
+                bmp = md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+                if (bmp == null) bmp = md.getBitmap(MediaMetadata.METADATA_KEY_ART);
+                if (bmp == null) bmp = md.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+            }
+            tTitle.setText(title != null ? title : "Reproduciendo");
+            tArtist.setText(artist != null ? artist : "");
+            art.setImageBitmap(bmp);
+
+            String pkg = ctrl.getPackageName();
+            try {
+                PackageManager pm = getPackageManager();
+                tApp.setText(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)));
+            } catch (Exception e) {
+                tApp.setText(pkg);
+            }
+
+            PlaybackState st = ctrl.getPlaybackState();
+            boolean playing = st != null && st.getState() == PlaybackState.STATE_PLAYING;
+            play.setType(playing ? Ui.IconView.PAUSE : Ui.IconView.PLAY);
+        }
+
+        void cleanup() {
+            try {
+                if (ctrl != null) ctrl.unregisterCallback(cb);
+            } catch (Exception ignored) {
+            }
+            try {
+                msm.removeOnActiveSessionsChangedListener(sl);
+            } catch (Exception ignored) {
+            }
+            ctrl = null;
+        }
+    }
 
     private void sendMediaKey(int keyCode) {
         try {
@@ -736,31 +951,279 @@ public class OverlayService extends Service {
         }
     }
 
-    /**
-     * Abre la app instalada a pantalla completa. Si el sistema soporta ventanas
-     * flotantes (modo freeform) la abre en una ventana de ese tamaño.
-     */
-    private void launch(String pkg) {
-        Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-        if (i == null) return;
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        Bundle opts = null;
-        if (Build.VERSION.SDK_INT >= 24) {
-            try {
-                i.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
-                DisplayMetrics dm = metrics();
-                int w = dm.widthPixels, h = dm.heightPixels;
-                Rect r = new Rect(w / 10, h / 6, w - w / 10, h - h / 6);
-                ActivityOptions o = ActivityOptions.makeBasic();
-                o.setLaunchBounds(r);
-                opts = o.toBundle();
-            } catch (Throwable ignored) {
-            }
+    // ------------------------------------------------------------------ mensajes
+
+    private static int chatColor(String pkg) {
+        switch (pkg) {
+            case "com.whatsapp":
+            case "com.whatsapp.w4b":
+                return 0xFF25D366;
+            case "org.telegram.messenger":
+                return 0xFF2AABEE;
+            case "com.facebook.orca":
+                return 0xFF0084FF;
+            case "com.instagram.android":
+                return 0xFFE1306C;
+            case "com.discord":
+                return 0xFF5865F2;
+            default:
+                return 0xFF7C5CFF;
         }
-        hidePanel();
+    }
+
+    private static String chatLetter(String pkg) {
+        switch (pkg) {
+            case "com.whatsapp":
+            case "com.whatsapp.w4b":
+                return "W";
+            case "org.telegram.messenger":
+                return "T";
+            case "com.facebook.orca":
+                return "M";
+            case "com.instagram.android":
+                return "I";
+            case "com.discord":
+                return "D";
+            default:
+                return "?";
+        }
+    }
+
+    /** Lista de chats con mensajes nuevos; al tocar uno se puede leer y responder. */
+    private final class MessagesUi {
+        final Set<String> pkgs;
+        final FrameLayout holder;
+        String openKey;
+        LinearLayout msgBox;
+        ScrollView msgScroll;
+        EditText input;
+
+        MessagesUi(Set<String> pkgs) {
+            this.pkgs = pkgs;
+            holder = new FrameLayout(OverlayService.this);
+            NotifService.onChange = this::refresh;
+            showList();
+        }
+
+        void cleanup() {
+            NotifService.onChange = null;
+        }
+
+        void refresh() {
+            if (mini == null) return;
+            if (openKey == null) showList();
+            else fillLines();
+        }
+
+        void showList() {
+            final Context c = OverlayService.this;
+            openKey = null;
+            holder.removeAllViews();
+
+            ScrollView sv = new ScrollView(c);
+            sv.setVerticalScrollBarEnabled(false);
+            LinearLayout col = new LinearLayout(c);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setPadding(Ui.dp(c, 10), Ui.dp(c, 4), Ui.dp(c, 10), Ui.dp(c, 4));
+            sv.addView(col);
+
+            List<NotifService.Conv> list = NotifService.list(pkgs);
+            if (list.isEmpty()) {
+                TextView none = new TextView(c);
+                none.setText("No hay mensajes nuevos.\nCuando te llegue uno aparece aquí y lo puedes responder.");
+                none.setTextSize(12);
+                none.setTextColor(0xFFB8B4D8);
+                none.setGravity(Gravity.CENTER);
+                none.setPadding(0, Ui.dp(c, 24), 0, 0);
+                col.addView(none);
+            }
+            for (final NotifService.Conv conv : list) {
+                LinearLayout row = new LinearLayout(c);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(Ui.dp(c, 8), Ui.dp(c, 8), Ui.dp(c, 8), Ui.dp(c, 8));
+                row.setBackground(Ui.rounded(0x14FFFFFF, Ui.dp(c, 12)));
+
+                TextView badge = new TextView(c);
+                badge.setText(chatLetter(conv.pkg));
+                badge.setTextColor(0xFFFFFFFF);
+                badge.setTextSize(14);
+                badge.setTypeface(Typeface.DEFAULT_BOLD);
+                badge.setGravity(Gravity.CENTER);
+                badge.setBackground(Ui.oval(chatColor(conv.pkg), chatColor(conv.pkg)));
+                row.addView(badge, new LinearLayout.LayoutParams(Ui.dp(c, 34), Ui.dp(c, 34)));
+
+                LinearLayout texts = new LinearLayout(c);
+                texts.setOrientation(LinearLayout.VERTICAL);
+                texts.setPadding(Ui.dp(c, 10), 0, 0, 0);
+                TextView t1 = new TextView(c);
+                t1.setText(conv.title);
+                t1.setTextSize(13);
+                t1.setTextColor(0xFFFFFFFF);
+                t1.setTypeface(Typeface.DEFAULT_BOLD);
+                t1.setSingleLine(true);
+                t1.setEllipsize(TextUtils.TruncateAt.END);
+                TextView t2 = new TextView(c);
+                t2.setText(conv.lines.get(conv.lines.size() - 1));
+                t2.setTextSize(12);
+                t2.setTextColor(0xFFB8B4D8);
+                t2.setMaxLines(2);
+                t2.setEllipsize(TextUtils.TruncateAt.END);
+                texts.addView(t1);
+                texts.addView(t2);
+                row.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+                row.setOnClickListener(v -> showChat(conv.key));
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                rlp.bottomMargin = Ui.dp(c, 6);
+                col.addView(row, rlp);
+            }
+            holder.addView(sv);
+        }
+
+        void showChat(String key) {
+            final Context c = OverlayService.this;
+            final NotifService.Conv conv = NotifService.get(key);
+            if (conv == null) {
+                showList();
+                return;
+            }
+            openKey = key;
+            holder.removeAllViews();
+
+            LinearLayout col = new LinearLayout(c);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setPadding(Ui.dp(c, 10), 0, Ui.dp(c, 10), Ui.dp(c, 4));
+
+            LinearLayout head = new LinearLayout(c);
+            head.setOrientation(LinearLayout.HORIZONTAL);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            Ui.IconView back = new Ui.IconView(c, Ui.IconView.BACK);
+            back.setOnClickListener(v -> showList());
+            head.addView(back, new LinearLayout.LayoutParams(Ui.dp(c, 32), Ui.dp(c, 32)));
+            TextView ttl = new TextView(c);
+            ttl.setText(conv.title);
+            ttl.setTextSize(13);
+            ttl.setTextColor(0xFFFFFFFF);
+            ttl.setTypeface(Typeface.DEFAULT_BOLD);
+            ttl.setSingleLine(true);
+            ttl.setEllipsize(TextUtils.TruncateAt.END);
+            head.addView(ttl, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            col.addView(head);
+
+            msgScroll = new ScrollView(c);
+            msgScroll.setVerticalScrollBarEnabled(false);
+            msgBox = new LinearLayout(c);
+            msgBox.setOrientation(LinearLayout.VERTICAL);
+            msgScroll.addView(msgBox);
+            col.addView(msgScroll, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+            if (conv.reply != null) {
+                LinearLayout bar = new LinearLayout(c);
+                bar.setOrientation(LinearLayout.HORIZONTAL);
+                bar.setGravity(Gravity.CENTER_VERTICAL);
+
+                input = new EditText(c);
+                input.setHint("Responder…");
+                input.setHintTextColor(0xFF7E7AA3);
+                input.setTextColor(0xFFFFFFFF);
+                input.setTextSize(13);
+                input.setSingleLine(true);
+                input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+                input.setBackground(Ui.rounded(0x1AFFFFFF, Ui.dp(c, 18)));
+                input.setPadding(Ui.dp(c, 12), Ui.dp(c, 6), Ui.dp(c, 12), Ui.dp(c, 6));
+                // Al tocar el campo se activa el teclado
+                input.setOnTouchListener((v, e) -> {
+                    if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                        setMiniFocusable(true);
+                        input.postDelayed(() -> {
+                            try {
+                                input.requestFocus();
+                                InputMethodManager imm = (InputMethodManager)
+                                        getSystemService(Context.INPUT_METHOD_SERVICE);
+                                imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT);
+                            } catch (Exception ignored) {
+                            }
+                        }, 150);
+                    }
+                    return false;
+                });
+                bar.addView(input, new LinearLayout.LayoutParams(0, Ui.dp(c, 40), 1f));
+
+                Ui.IconView send = new Ui.IconView(c, Ui.IconView.SEND);
+                send.setBackground(Ui.oval(0xFF7C5CFF, 0xFF4C2FD6));
+                send.setOnClickListener(v -> {
+                    String t = input.getText().toString().trim();
+                    if (t.isEmpty()) return;
+                    if (sendReply(conv, t)) {
+                        input.setText("");
+                        fillLines();
+                    }
+                });
+                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(Ui.dp(c, 38), Ui.dp(c, 38));
+                slp.leftMargin = Ui.dp(c, 6);
+                bar.addView(send, slp);
+
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                blp.topMargin = Ui.dp(c, 6);
+                col.addView(bar, blp);
+            } else {
+                TextView no = new TextView(c);
+                no.setText("Esta app no deja responder desde aquí.");
+                no.setTextSize(11);
+                no.setTextColor(0xFF7E7AA3);
+                no.setGravity(Gravity.CENTER);
+                no.setPadding(0, Ui.dp(c, 6), 0, 0);
+                col.addView(no);
+            }
+            holder.addView(col);
+            fillLines();
+        }
+
+        void fillLines() {
+            final Context c = OverlayService.this;
+            NotifService.Conv conv = openKey != null ? NotifService.get(openKey) : null;
+            if (conv == null || msgBox == null) {
+                showList();
+                return;
+            }
+            msgBox.removeAllViews();
+            for (String line : conv.lines) {
+                boolean mine = line.startsWith("Tú: ");
+                TextView t = new TextView(c);
+                t.setText(line);
+                t.setTextSize(12);
+                t.setTextColor(0xFFFFFFFF);
+                t.setPadding(Ui.dp(c, 10), Ui.dp(c, 6), Ui.dp(c, 10), Ui.dp(c, 6));
+                t.setBackground(Ui.rounded(mine ? 0x667C5CFF : 0x1AFFFFFF, Ui.dp(c, 12)));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = Ui.dp(c, 4);
+                lp.gravity = mine ? Gravity.END : Gravity.START;
+                msgBox.addView(t, lp);
+            }
+            msgScroll.post(() -> msgScroll.fullScroll(View.FOCUS_DOWN));
+        }
+    }
+
+    /** Responde usando la acción "Responder" de la propia notificación de la app. */
+    private boolean sendReply(NotifService.Conv conv, String text) {
         try {
-            startActivity(i, opts);
-        } catch (Exception ignored) {
+            Notification.Action a = conv.reply;
+            RemoteInput[] ris = a.getRemoteInputs();
+            Intent i = new Intent();
+            Bundle b = new Bundle();
+            for (RemoteInput ri : ris) b.putCharSequence(ri.getResultKey(), text);
+            RemoteInput.addResultsToIntent(ris, i, b);
+            a.actionIntent.send(this, 0, i);
+            conv.lines.add("Tú: " + text);
+            while (conv.lines.size() > 10) conv.lines.remove(0);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 }

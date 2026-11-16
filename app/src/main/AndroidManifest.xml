@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -9,17 +8,14 @@
 
     <queries>
         <package android:name="com.dywx.larkplayer" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.apps.youtube.music" />
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
-        <package android:name="com.spotify.music" />
-        <package android:name="com.google.android.youtube" />
-        <package android:name="com.zhiliaoapp.musically" />
-        <package android:name="com.instagram.android" />
-        <package android:name="com.facebook.orca" />
-        <package android:name="com.facebook.katana" />
-        <package android:name="com.discord" />
         <package android:name="org.telegram.messenger" />
-        <package android:name="com.android.chrome" />
+        <package android:name="com.facebook.orca" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.discord" />
     </queries>
 
     <application
@@ -45,6 +41,16 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="floating_overlay_panel" />
+        </service>
+
+        <service
+            android:name=".NotifService"
+            android:exported="true"
+            android:label="Panel Gamer"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
     </application>
 </manifest>

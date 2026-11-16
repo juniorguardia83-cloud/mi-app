@@ -18,6 +18,7 @@ public class MainActivity extends Activity {
 
     private TextView status;
     private TextView mainButton;
+    private TextView notifButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,7 +49,7 @@ public class MainActivity extends Activity {
         tlp.topMargin = Ui.dp(this, 20);
         root.addView(title, tlp);
 
-        TextView sub = text("Una burbuja flotante para abrir WhatsApp, YouTube, Spotify y más en una ventana chica mientras juegas.",
+        TextView sub = text("Una burbuja flotante con tu música (Lark Player, Spotify...) y tus mensajes (WhatsApp, Telegram...) en ventanas chicas mientras juegas. Sin iniciar sesión.",
                 14, 0xFFB8B4D8, false);
         sub.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams slp = wrap();
@@ -67,6 +68,23 @@ public class MainActivity extends Activity {
         mlp.topMargin = Ui.dp(this, 14);
         root.addView(mainButton, mlp);
 
+        notifButton = button("", 0x22FFFFFF, 0x22FFFFFF);
+        notifButton.setTextSize(13);
+        notifButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+                } catch (Exception e) {
+                    startActivity(new Intent(Settings.ACTION_SETTINGS));
+                }
+            }
+        });
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 46));
+        nlp.topMargin = Ui.dp(this, 12);
+        root.addView(notifButton, nlp);
+
         TextView battery = button("Evitar que el sistema cierre la app", 0x22FFFFFF, 0x22FFFFFF);
         battery.setTextSize(13);
         battery.setOnClickListener(new View.OnClickListener() {
@@ -80,8 +98,8 @@ public class MainActivity extends Activity {
         blp.topMargin = Ui.dp(this, 12);
         root.addView(battery, blp);
 
-        TextView tip = text("Tip: en Ajustes > Batería, deja \"Panel Gamer\" sin restricciones "
-                + "para que la burbuja no se cierre mientras juegas.", 12, 0xFF7E7AA3, false);
+        TextView tip = text("Privacidad: la app no tiene internet. Lo que lee de tus notificaciones "
+                + "se queda solo en tu celular.", 12, 0xFF7E7AA3, false);
         tip.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams tiplp = wrap();
         tiplp.topMargin = Ui.dp(this, 18);
@@ -101,6 +119,9 @@ public class MainActivity extends Activity {
     }
 
     private void refresh() {
+        notifButton.setText(NotifService.isEnabled(this)
+                ? "Acceso a notificaciones: activado ✓"
+                : "2. Dar acceso a notificaciones (música y mensajes)");
         if (!Settings.canDrawOverlays(this)) {
             status.setText("Falta un permiso: mostrar sobre otras apps");
             mainButton.setText("1. Dar permiso");

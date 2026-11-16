@@ -1,29 +1,34 @@
 # Panel Gamer
 
 Burbuja flotante con forma de control de consola para jugar sin salir del juego.
-Al tocarla abre un panel con:
+Al tocarla abre un panel con ventanas chicas conectadas a las apps de tu celular
+(sin versiones web ni iniciar sesión):
 
-- **Ventana chica** (con una X roja abajo para cerrarla): WhatsApp, YouTube, Spotify, Instagram, TikTok, Telegram, Discord, Facebook y buscador. Se arrastra desde la barra de arriba y no ocupa ni la mitad ni la pantalla entera.
-- **Controles de música** (anterior, play/pausa, siguiente) que funcionan con Lark Player, Spotify y otros reproductores.
-- **App completa**: Lark Player, WhatsApp, Spotify, etc. instaladas en el celular (solo aparecen las que tengas).
+- **Música**: Lark Player, Spotify, YT Music o la que esté sonando. Muestra portada, título y botones anterior / play-pausa / siguiente.
+- **Mensajes**: WhatsApp, Telegram, Messenger, Instagram y Discord. Muestra los chats con mensajes nuevos y los puedes responder desde la ventana.
 
-Hecha para el ZTE Blade V Smart: sin librerías, el panel y la ventana solo existen en memoria mientras están abiertos.
+Cada ventana:
+- Tiene una **X roja abajo** para cerrarla.
+- Se **arrastra** desde la barra de arriba.
+- Se **ajusta de tamaño** arrastrando la esquina de abajo a la derecha (el tamaño se guarda).
+- Por defecto es chica: ni la mitad de la pantalla ni pantalla completa.
 
-## Instalar en el celular
+## Cómo se conecta a las apps
+
+Usa el permiso **Acceso a notificaciones** de Android (el mismo que usan los relojes inteligentes). Con él lee la música que suena y los mensajes que llegan, y responde con el botón "Responder" de la propia notificación. La app **no tiene permiso de internet**, así que nada sale del celular.
+
+## Instalar
 
 1. En GitHub entra a **Releases** y baja `PanelGamer.apk`.
 2. Ábrelo y acepta "instalar apps de origen desconocido".
-3. Abre **Panel Gamer**, toca **Dar permiso** (mostrar sobre otras apps) y luego **Iniciar panel**.
+3. Abre **Panel Gamer**: **Dar permiso** (mostrar sobre otras apps), **Dar acceso a notificaciones** y **Iniciar panel**.
 4. Para que no se cierre jugando: Ajustes > Batería > deja Panel Gamer sin restricciones.
 
-## Cosas a saber
+## Limitaciones
 
-- La ventana chica usa las versiones web de las apps (Android común no deja encoger apps instaladas). Hay que iniciar sesión una vez; después queda guardada.
-- WhatsApp Web: usa "Vincular con número de teléfono" (no se puede escanear el QR con el mismo celular).
-- Spotify Web puede no reproducir en algunos celulares; para música usa Lark Player con los botones del panel.
-- Lark Player no tiene versión web, así que se abre a pantalla completa y se controla desde el panel.
-- Mantén actualizado "Android System WebView" en Play Store para que las páginas funcionen bien.
-- Cada ventana abierta gasta RAM: ciérrala con la X cuando termines.
+- Los mensajes aparecen cuando llega una notificación; si ya la quitaste o abriste el chat, ya no se ve aquí.
+- La música aparece cuando el reproductor ya tiene una canción (dale play una vez en Lark Player).
+- Videos (YouTube, TikTok) no se pueden mostrar en ventana chica; no hay forma sin una versión web o modo ventana del sistema.
 
 ## Compilar
 

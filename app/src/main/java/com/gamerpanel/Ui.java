@@ -38,20 +38,28 @@ final class Ui {
         return d;
     }
 
-    /** Íconos simples: anterior, play, siguiente, cerrar y control de consola. */
+    /** Íconos simples dibujados por código. */
     static final class IconView extends View {
-        static final int PREV = 0, PLAY = 1, NEXT = 2, CLOSE = 3, PAD = 4;
+        static final int PREV = 0, PLAY = 1, NEXT = 2, CLOSE = 3, PAD = 4,
+                PAUSE = 5, GRIP = 6, SEND = 7, BACK = 8;
 
-        private final int type;
+        private int type;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path path = new Path();
         private final RectF rect = new RectF();
         private int color = Color.WHITE;
-        private int accent = 0xFF2B1A66;
+        private final int accent = 0xFF2B1A66;
 
         IconView(Context c, int type) {
             super(c);
             this.type = type;
+        }
+
+        void setType(int type) {
+            if (this.type != type) {
+                this.type = type;
+                invalidate();
+            }
         }
 
         void setIconColor(int color) {
@@ -76,6 +84,11 @@ final class Ui {
                     cv.drawPath(path, p);
                     break;
 
+                case PAUSE:
+                    cv.drawRect(cx - .2f * s, cy - .22f * s, cx - .06f * s, cy + .22f * s, p);
+                    cv.drawRect(cx + .06f * s, cy - .22f * s, cx + .2f * s, cy + .22f * s, p);
+                    break;
+
                 case PREV:
                     cv.drawRect(cx - .24f * s, cy - .2f * s, cx - .18f * s, cy + .2f * s, p);
                     path.moveTo(cx + .22f * s, cy - .2f * s);
@@ -94,12 +107,39 @@ final class Ui {
                     cv.drawPath(path, p);
                     break;
 
+                case SEND:
+                    path.moveTo(cx - .2f * s, cy - .2f * s);
+                    path.lineTo(cx + .26f * s, cy);
+                    path.lineTo(cx - .2f * s, cy + .2f * s);
+                    path.lineTo(cx - .1f * s, cy);
+                    path.close();
+                    cv.drawPath(path, p);
+                    break;
+
                 case CLOSE:
                     p.setStyle(Paint.Style.STROKE);
                     p.setStrokeWidth(.08f * s);
                     p.setStrokeCap(Paint.Cap.ROUND);
                     cv.drawLine(cx - .17f * s, cy - .17f * s, cx + .17f * s, cy + .17f * s, p);
                     cv.drawLine(cx + .17f * s, cy - .17f * s, cx - .17f * s, cy + .17f * s, p);
+                    break;
+
+                case BACK:
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(.08f * s);
+                    p.setStrokeCap(Paint.Cap.ROUND);
+                    cv.drawLine(cx + .08f * s, cy - .2f * s, cx - .1f * s, cy, p);
+                    cv.drawLine(cx - .1f * s, cy, cx + .08f * s, cy + .2f * s, p);
+                    break;
+
+                case GRIP:
+                    // Tres rayitas en diagonal, esquina inferior derecha (para cambiar el tamaño)
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(.06f * s);
+                    p.setStrokeCap(Paint.Cap.ROUND);
+                    cv.drawLine(cx + .3f * s, cy - .3f * s, cx - .3f * s, cy + .3f * s, p);
+                    cv.drawLine(cx + .3f * s, cy - .1f * s, cx - .1f * s, cy + .3f * s, p);
+                    cv.drawLine(cx + .3f * s, cy + .1f * s, cx + .1f * s, cy + .3f * s, p);
                     break;
 
                 case PAD:
